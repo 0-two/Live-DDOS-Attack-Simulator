@@ -58,12 +58,34 @@ export type GlobeConfig = {
   autoRotateSpeed?: number;
 };
 
+export type GlobeFrame = { arcs: GlobeArc[]; points: GlobePoint[]; rings: GlobeRing[] };
+
+/**
+ * Arc/point/ring data is pushed through a subscription instead of props, so a
+ * new arc updates three-globe directly without re-rendering the React tree
+ * (and the R3F canvas) several times a second.
+ */
+export type GlobeFeed = {
+  get(): GlobeFrame;
+  subscribe(fn: (f: GlobeFrame) => void): () => void;
+};
+
 type GlobeProps = {
   globeConfig: GlobeConfig;
-  arcs: GlobeArc[];
-  points: GlobePoint[];
-  rings: GlobeRing[];
+  feed: GlobeFeed;
 };
+
+/**
+ * An invisible, permanent ring (speed 0, no repeat → created once, never removed).
+ * Impact rings are short-lived; whenever none were alive three.js released the
+ * line shader and recompiled it for the next ring, causing a visible hitch.
+ */
+const KEEPALIVE_RING: GlobeRing = { lat: 0, lng: 0, color: "#000000", maxRadius: 0.5 };
+// Same idea for arcs and points, which can all disappear while paused or filtered.
+const KEEPALIVE_ARC: GlobeArc = {
+  id: -1, startLat: 0, startLng: 0, endLat: 0, endLng: 1, arcAlt: 0.01, color: "#000000", stroke: 0.01,
+};
+const KEEPALIVE_POINT: GlobePoint = { lat: 0, lng: 0, color: "rgba(0,0,0,0)", size: 0.01 };
 
 function rgba(hex: string, a: number) {
   const m = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
@@ -71,7 +93,7 @@ function rgba(hex: string, a: number) {
   return `rgba(${parseInt(m[1], 16)},${parseInt(m[2], 16)},${parseInt(m[3], 16)},${a})`;
 }
 
-export function Globe({ globeConfig, arcs, points, rings }: GlobeProps) {
+export function Globe({ globeConfig, feed }: GlobeProps) {
   const globeRef = useRef<ThreeGlobe | null>(null);
   const groupRef = useRef<Group>(null);
   const [ready, setReady] = useState(false);
@@ -112,6 +134,7 @@ export function Globe({ globeConfig, arcs, points, rings }: GlobeProps) {
       .arcEndLat((d) => (d as GlobeArc).endLat)
       .arcEndLng((d) => (d as GlobeArc).endLng)
       .arcColor((d: object) => {
+        if (d === KEEPALIVE_ARC) return ["rgba(0,0,0,0)", "rgba(0,0,0,0)"];
         const c = (d as GlobeArc).color;
         return [rgba(c, 0.15), c];
       })
@@ -121,18 +144,24 @@ export function Globe({ globeConfig, arcs, points, rings }: GlobeProps) {
       .arcDashGap(50)
       .arcDashInitialGap(1)
       .arcDashAnimateTime(cfg.arcTime)
+      .arcCurveResolution(40) // default 64; plenty for short-lived arcs
+      .arcCircularResolution(4) // default 6; tubes are thin
       .arcsTransitionDuration(0);
 
     g.pointColor((d) => (d as GlobePoint).color)
       .pointAltitude(0.005)
       .pointRadius((d) => (d as GlobePoint).size)
-      .pointsMerge(true)
+      // Not merged: a merged mesh is rebuilt (new material, disposed old one) on every
+      // change, which forces three.js to recompile the shader each time.
+      .pointsMerge(false)
       .pointsTransitionDuration(0);
 
-    g.ringColor((d: object) => (t: number) => rgba((d as GlobeRing).color, Math.max(0, 1 - t)))
+    g.ringColor((d: object) =>
+      d === KEEPALIVE_RING ? "rgba(0,0,0,0)" : (t: number) => rgba((d as GlobeRing).color, Math.max(0, 1 - t)),
+    )
       .ringMaxRadius((d: object) => (d as GlobeRing).maxRadius)
-      .ringPropagationSpeed(4)
-      .ringRepeatPeriod(700);
+      .ringPropagationSpeed((d: object) => (d === KEEPALIVE_RING ? 0 : 4))
+      .ringRepeatPeriod((d: object) => (d === KEEPALIVE_RING ? 0 : 700));
 
     setReady(true);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -154,17 +183,20 @@ export function Globe({ globeConfig, arcs, points, rings }: GlobeProps) {
 
   // Arc objects keep their identity between updates, so three-globe only
   // creates geometry for new arcs and existing dashes keep animating.
+  // Each layer is only re-digested when its array actually changed.
   useEffect(() => {
-    if (ready) globeRef.current?.arcsData(arcs);
-  }, [ready, arcs]);
-
-  useEffect(() => {
-    if (ready) globeRef.current?.pointsData(points);
-  }, [ready, points]);
-
-  useEffect(() => {
-    if (ready) globeRef.current?.ringsData(rings);
-  }, [ready, rings]);
+    const g = globeRef.current;
+    if (!ready || !g) return;
+    let prev: GlobeFrame = { arcs: [], points: [], rings: [] };
+    const apply = (f: GlobeFrame) => {
+      if (f.arcs !== prev.arcs) g.arcsData([KEEPALIVE_ARC, ...f.arcs]);
+      if (f.points !== prev.points) g.pointsData([KEEPALIVE_POINT, ...f.points]);
+      if (f.rings !== prev.rings) g.ringsData([KEEPALIVE_RING, ...f.rings]);
+      prev = f;
+    };
+    apply(feed.get());
+    return feed.subscribe(apply);
+  }, [ready, feed]);
 
   return <group ref={groupRef} />;
 }
@@ -191,7 +223,7 @@ export const World = memo(function World(props: GlobeProps) {
   );
 
   return (
-    <Canvas scene={scene} camera={camera} dpr={[1, 2]}>
+    <Canvas scene={scene} camera={camera} dpr={[1, 1.5]} gl={{ powerPreference: "high-performance" }}>
       <WebGLRendererConfig />
       <ambientLight color={globeConfig.ambientLight} intensity={0.6} />
       <directionalLight color={globeConfig.directionalLeftLight} position={new Vector3(-400, 100, 400)} />

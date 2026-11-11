@@ -87,7 +87,7 @@ export function AttackMap() {
           {/* Globe: inline on mobile, centred behind the columns on desktop */}
           <div className="relative -mx-4 aspect-square sm:mx-auto sm:w-full sm:max-w-[560px] lg:pointer-events-none lg:fixed lg:inset-0 lg:z-0 lg:m-auto lg:aspect-auto lg:h-[min(100dvh,calc(100vw-620px))] lg:w-[min(100dvh,calc(100vw-620px))] lg:max-w-none">
             <div className="size-full lg:pointer-events-auto">
-              <World globeConfig={globeConfig} arcs={s.arcs} points={s.points} rings={s.rings} />
+              <World globeConfig={globeConfig} feed={s.globe} />
             </div>
           </div>
 
@@ -101,7 +101,7 @@ export function AttackMap() {
           <div className="relative z-10 flex flex-col gap-4 lg:col-start-3 lg:row-span-2 lg:row-start-1 lg:min-h-0">
             <PeakCard peak={s.peak} />
             <div className="flex h-[420px] min-h-0 flex-col lg:h-auto lg:flex-1">
-              <LiveFeed events={s.feed} paused={paused} />
+              <LiveFeed events={s.feed} paused={paused} layers={layers} />
             </div>
             {s.snapshot && <AttackMix snapshot={s.snapshot} pos={s.replay.pos} />}
           </div>

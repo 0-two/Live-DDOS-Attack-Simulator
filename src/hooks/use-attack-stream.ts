@@ -1,6 +1,6 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
-import type { GlobeArc, GlobePoint, GlobeRing } from "@/components/ui/globe";
+import type { GlobeArc, GlobeFeed, GlobeFrame, GlobePoint, GlobeRing } from "@/components/ui/globe";
 import { locate } from "@/lib/geo";
 import { createGenerator, type Generator } from "@/lib/simulate";
 import type { AttackEvent, Snapshot } from "@/lib/types";
@@ -9,33 +9,24 @@ export const REFRESH_MS = 5 * 60_000;
 export const ARC_TIME = 1600;
 const ARC_LIFETIME = ARC_TIME * 1.5 + 150;
 const RING_TIME = 1100;
-const MAX_ACTIVE = 90;
-const FEED_SIZE = 14;
+const MAX_ACTIVE = 70;
+const FEED_SIZE = 12;
+/** Simulation + globe update cadence. The globe is fed directly, outside React. */
 const TICK_MS = 100;
-const PUBLISH_MS = 200;
+/** React (panel) re-render cadence — kept slower so the DOM stays cheap. */
+const UI_MS = 400;
 
 export const LAYER_COLOR = { L3: "#ff5b3a", L7: "#c8f560" } as const;
 
 export type LayerFilter = "all" | "L3" | "L7";
 export type StreamOptions = { paused: boolean; layers: LayerFilter };
 
-type Live = {
-  ev: AttackEvent;
-  arc: GlobeArc;
-  ring: GlobeRing;
-};
+type Live = { ev: AttackEvent; arc: GlobeArc; ring: GlobeRing };
 
 export type Counter = { key: string; name: string; count: number };
 
-export type StreamState = {
-  snapshot: Snapshot | null;
-  status: "loading" | "ok" | "error";
-  error: string | null;
-  nextRefreshAt: number;
+type View = {
   feed: AttackEvent[];
-  arcs: GlobeArc[];
-  points: GlobePoint[];
-  rings: GlobeRing[];
   total: number;
   byLayer: { L3: number; L7: number };
   perSecond: number;
@@ -45,6 +36,33 @@ export type StreamState = {
   peak: AttackEvent | null;
   replay: { pos: number; v: number; t: string | null };
 };
+
+export type StreamState = View & {
+  snapshot: Snapshot | null;
+  status: "loading" | "ok" | "error";
+  error: string | null;
+  nextRefreshAt: number;
+  /** Stable handle the globe subscribes to; never changes identity. */
+  globe: GlobeFeed;
+};
+
+function createGlobeFeed(): GlobeFeed & { emit(f: GlobeFrame): void } {
+  let frame: GlobeFrame = { arcs: [], points: [], rings: [] };
+  const subs = new Set<(f: GlobeFrame) => void>();
+  return {
+    get: () => frame,
+    subscribe(fn) {
+      subs.add(fn);
+      return () => void subs.delete(fn);
+    },
+    emit(f) {
+      frame = f;
+      subs.forEach((fn) => fn(f));
+    },
+  };
+}
+
+const sameRefs = <T,>(a: T[], b: T[]) => a.length === b.length && a.every((x, i) => x === b[i]);
 
 function poisson(lambda: number) {
   // Knuth for small λ (we call this every 100 ms, so λ is ~0.1–3).
@@ -67,9 +85,7 @@ function arcAltitude(a: { lat: number; lng: number }, b: { lat: number; lng: num
   return 0.06 + (angle / Math.PI) * 0.55;
 }
 
-function jitter(v: number, amt: number) {
-  return v + (Math.random() - 0.5) * amt;
-}
+const jitter = (v: number, amt: number) => v + (Math.random() - 0.5) * amt;
 
 function bump(map: Map<string, Counter>, key: string, name: string) {
   const c = map.get(key);
@@ -77,8 +93,7 @@ function bump(map: Map<string, Counter>, key: string, name: string) {
   else map.set(key, { key, name, count: 1 });
 }
 
-const top = (m: Map<string, Counter>, n: number) =>
-  [...m.values()].sort((a, b) => b.count - a.count).slice(0, n);
+const top = (m: Map<string, Counter>, n: number) => [...m.values()].sort((a, b) => b.count - a.count).slice(0, n);
 
 export function useAttackStream(options: StreamOptions): StreamState {
   const opts = useRef(options);
@@ -86,15 +101,13 @@ export function useAttackStream(options: StreamOptions): StreamState {
     opts.current = options;
   }, [options]);
 
+  const [globe] = useState(createGlobeFeed);
   const [snapshot, setSnapshot] = useState<Snapshot | null>(null);
   const [status, setStatus] = useState<StreamState["status"]>("loading");
   const [error, setError] = useState<string | null>(null);
   const [nextRefreshAt, setNextRefreshAt] = useState(0);
-  const [view, setView] = useState<Omit<StreamState, "snapshot" | "status" | "error" | "nextRefreshAt">>({
+  const [view, setView] = useState<View>({
     feed: [],
-    arcs: [],
-    points: [],
-    rings: [],
     total: 0,
     byLayer: { L3: 0, L7: 0 },
     perSecond: 0,
@@ -147,7 +160,7 @@ export function useAttackStream(options: StreamOptions): StreamState {
 
   // ---- Event loop ------------------------------------------------------------------
   useEffect(() => {
-    const live: Live[] = [];
+    let live: Live[] = [];
     const feed: AttackEvent[] = [];
     const targets = new Map<string, Counter>();
     const origins = new Map<string, Counter>();
@@ -155,11 +168,12 @@ export function useAttackStream(options: StreamOptions): StreamState {
     let total = 0;
     const byLayer = { L3: 0, L7: 0 };
     let last = performance.now();
-    let lastPublish = 0;
+    let lastUi = 0;
     const pointCache = new Map<string, GlobePoint>();
-    let points: GlobePoint[] = [];
+    let frame: GlobeFrame = globe.get();
     let lastPtKey = "";
     let peak: AttackEvent | null = null;
+    let lastFilter: LayerFilter = opts.current.layers;
 
     const tick = () => {
       const g = gen.current;
@@ -168,9 +182,15 @@ export function useAttackStream(options: StreamOptions): StreamState {
       const dt = Math.min(nowPerf - last, 500) / 1000;
       last = nowPerf;
       const now = Date.now();
+      const { paused, layers: filter } = opts.current;
 
-      if (g && !opts.current.paused) {
-        const filter = opts.current.layers;
+      // Filter changed: drop in-flight arcs of the hidden layer so the switch is instant.
+      if (filter !== lastFilter) {
+        lastFilter = filter;
+        if (filter !== "all") live = live.filter((l) => l.ev.layer === filter);
+      }
+
+      if (g && !paused) {
         const n = poisson(g.rate(now) * dt);
         for (let i = 0; i < n; i++) {
           const ev = g.next(now - Math.random() * dt * 1000);
@@ -211,14 +231,10 @@ export function useAttackStream(options: StreamOptions): StreamState {
       }
 
       // Expire.
-      for (let i = live.length - 1; i >= 0; i--) {
-        if (now - live[i].ev.at > ARC_LIFETIME + RING_TIME) live.splice(i, 1);
-      }
+      live = live.filter((l) => now - l.ev.at <= ARC_LIFETIME + RING_TIME);
       while (recent.length && now - recent[0] > 5000) recent.shift();
 
-      if (nowPerf - lastPublish < PUBLISH_MS) return;
-      lastPublish = nowPerf;
-
+      // ---- Globe: push only what changed, straight to three-globe ----
       const arcs = live.filter((l) => now - l.ev.at < ARC_LIFETIME).map((l) => l.arc);
       const rings = live
         .filter((l) => {
@@ -242,16 +258,22 @@ export function useAttackStream(options: StreamOptions): StreamState {
         pts.set(`t${l.ev.target}`, pointCache.get(tk)!);
       }
       const ptKey = [...pts.keys()].sort().join();
-      if (ptKey !== lastPtKey) {
-        lastPtKey = ptKey;
-        points = [...pts.values()];
+      const next: GlobeFrame = {
+        arcs: sameRefs(arcs, frame.arcs) ? frame.arcs : arcs,
+        rings: sameRefs(rings, frame.rings) ? frame.rings : rings,
+        points: ptKey === lastPtKey ? frame.points : [...pts.values()],
+      };
+      lastPtKey = ptKey;
+      if (next.arcs !== frame.arcs || next.rings !== frame.rings || next.points !== frame.points) {
+        frame = next;
+        globe.emit(frame);
       }
 
+      // ---- Panels: slower React updates ----
+      if (nowPerf - lastUi < UI_MS) return;
+      lastUi = nowPerf;
       setView({
         feed: feed.slice(),
-        arcs,
-        rings,
-        points,
         total,
         byLayer: { ...byLayer },
         perSecond: recent.length / 5,
@@ -264,7 +286,7 @@ export function useAttackStream(options: StreamOptions): StreamState {
 
     const id = setInterval(tick, TICK_MS);
     return () => clearInterval(id);
-  }, []);
+  }, [globe]);
 
-  return { snapshot, status, error, nextRefreshAt, ...view };
+  return { snapshot, status, error, nextRefreshAt, globe, ...view };
 }

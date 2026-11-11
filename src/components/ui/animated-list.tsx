@@ -10,16 +10,24 @@ import { AnimatePresence, motion, type MotionProps } from "motion/react"
 
 import { cn } from "@/lib/utils"
 
-export function AnimatedListItem({ children }: { children: React.ReactNode }) {
+// Local change: accepts a ref (so it works inside <AnimatePresence mode="popLayout">)
+// and exits with a quick fade, so a burst of new items never stacks on leaving ones.
+export function AnimatedListItem({
+  children,
+  ref,
+}: {
+  children: React.ReactNode
+  ref?: React.Ref<HTMLDivElement>
+}) {
   const animations: MotionProps = {
     initial: { scale: 0, opacity: 0 },
     animate: { scale: 1, opacity: 1, originY: 0 },
-    exit: { scale: 0, opacity: 0 },
+    exit: { opacity: 0, transition: { duration: 0.15 } },
     transition: { type: "spring", stiffness: 350, damping: 40 },
   }
 
   return (
-    <motion.div {...animations} layout className="mx-auto w-full">
+    <motion.div ref={ref} {...animations} layout="position" className="mx-auto w-full">
       {children}
     </motion.div>
   )

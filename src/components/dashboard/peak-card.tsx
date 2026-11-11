@@ -7,7 +7,7 @@ import { Flag } from "./flag";
 
 export function PeakCard({ peak }: { peak: AttackEvent | null }) {
   return (
-    <section className="relative overflow-hidden rounded-2xl border bg-card/60 p-4 backdrop-blur-md">
+    <section className="relative overflow-hidden rounded-2xl border bg-card/85 p-4">
       <div className="flex items-center justify-between">
         <h2 className="text-[13px] font-medium">Largest this session</h2>
         {peak && (

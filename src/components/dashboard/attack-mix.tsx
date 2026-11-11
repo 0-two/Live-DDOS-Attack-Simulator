@@ -76,7 +76,7 @@ function Sparkline({ snapshot, pos }: { snapshot: Snapshot; pos: number }) {
 
 export function AttackMix({ snapshot, pos }: { snapshot: Snapshot; pos: number }) {
   return (
-    <section className="space-y-4 rounded-2xl border bg-card/60 p-4 backdrop-blur-md">
+    <section className="space-y-4 rounded-2xl border bg-card/85 p-4">
       <Segmented label="L3/4 vectors" rows={snapshot.l3Vectors} color="var(--l3)" />
       <Segmented label="L7 methods" rows={snapshot.l7Methods} color="var(--l7)" />
       <Sparkline snapshot={snapshot} pos={pos} />

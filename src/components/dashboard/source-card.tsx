@@ -55,7 +55,7 @@ export function SourceCard({
       <HoverCardTrigger asChild>
         <button
           type="button"
-          className="flex h-7 items-center gap-2 rounded-full border bg-background/40 px-3 text-xs backdrop-blur transition-colors hover:bg-muted"
+          className="flex h-7 items-center gap-2 rounded-full border bg-background/80 px-3 text-xs transition-colors hover:bg-muted"
         >
           <span className="relative flex size-1.5">
             <span
