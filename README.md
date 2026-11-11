@@ -21,24 +21,6 @@ If the token is missing or the API fails, the API returns built-in sample data a
 
 > Note: for Layer 3 attacks Cloudflare reports the *data center* that received the traffic as the origin, because source IPs are spoofed.
 
-## Run locally
-
-```bash
-cp .env.example .env.local   # add your CLOUDFLARE_API_TOKEN
-npm install
-npm run dev
-```
-
-## Deploy to Vercel
-
-```bash
-npx vercel login
-npx vercel link
-npx vercel env add CLOUDFLARE_API_TOKEN production   # paste the token
-npx vercel --prod
-```
-
-Or push to GitHub, import the repo at vercel.com/new, and add `CLOUDFLARE_API_TOKEN` under **Settings → Environment Variables**.
 
 ## Regenerating geo data
 
