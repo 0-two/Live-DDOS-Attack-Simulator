@@ -16,8 +16,6 @@
   <img src="docs/demo.gif" alt="Demo of the live DDoS attack map: arcs fly across a rotating globe while the dashboard updates" width="860" />
 </a>
 
-<sub>Click the preview to watch the full-quality video.</sub>
-
 <br />
 
 [About](#about) &nbsp;·&nbsp; [Features](#features) &nbsp;·&nbsp; [How it works](#how-it-works) &nbsp;·&nbsp; [Getting started](#getting-started) &nbsp;·&nbsp; [Deploy](#deploy-to-vercel) &nbsp;·&nbsp; [Configuration](#configuration) &nbsp;·&nbsp; [Project structure](#project-structure)
