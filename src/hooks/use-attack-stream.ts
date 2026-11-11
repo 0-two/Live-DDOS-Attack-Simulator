@@ -10,11 +10,14 @@ export const ARC_TIME = 1600;
 const ARC_LIFETIME = ARC_TIME * 1.5 + 150;
 const RING_TIME = 1100;
 const MAX_ACTIVE = 90;
-const FEED_SIZE = 40;
+const FEED_SIZE = 14;
 const TICK_MS = 100;
 const PUBLISH_MS = 200;
 
-export const LAYER_COLOR = { L3: "#ff6a3d", L7: "#3dd6ff" } as const;
+export const LAYER_COLOR = { L3: "#ff5b3a", L7: "#c8f560" } as const;
+
+export type LayerFilter = "all" | "L3" | "L7";
+export type StreamOptions = { paused: boolean; layers: LayerFilter };
 
 type Live = {
   ev: AttackEvent;
@@ -38,6 +41,8 @@ export type StreamState = {
   perSecond: number;
   topTargets: Counter[];
   topOrigins: Counter[];
+  /** Highest-severity event seen this session. */
+  peak: AttackEvent | null;
   replay: { pos: number; v: number; t: string | null };
 };
 
@@ -75,7 +80,12 @@ function bump(map: Map<string, Counter>, key: string, name: string) {
 const top = (m: Map<string, Counter>, n: number) =>
   [...m.values()].sort((a, b) => b.count - a.count).slice(0, n);
 
-export function useAttackStream(): StreamState {
+export function useAttackStream(options: StreamOptions): StreamState {
+  const opts = useRef(options);
+  useEffect(() => {
+    opts.current = options;
+  }, [options]);
+
   const [snapshot, setSnapshot] = useState<Snapshot | null>(null);
   const [status, setStatus] = useState<StreamState["status"]>("loading");
   const [error, setError] = useState<string | null>(null);
@@ -90,6 +100,7 @@ export function useAttackStream(): StreamState {
     perSecond: 0,
     topTargets: [],
     topOrigins: [],
+    peak: null,
     replay: { pos: 0, v: 0, t: null },
   });
 
@@ -148,6 +159,7 @@ export function useAttackStream(): StreamState {
     const pointCache = new Map<string, GlobePoint>();
     let points: GlobePoint[] = [];
     let lastPtKey = "";
+    let peak: AttackEvent | null = null;
 
     const tick = () => {
       const g = gen.current;
@@ -157,15 +169,18 @@ export function useAttackStream(): StreamState {
       last = nowPerf;
       const now = Date.now();
 
-      if (g) {
+      if (g && !opts.current.paused) {
+        const filter = opts.current.layers;
         const n = poisson(g.rate(now) * dt);
         for (let i = 0; i < n; i++) {
           const ev = g.next(now - Math.random() * dt * 1000);
           lastId.current = ev.id;
+          if (filter !== "all" && ev.layer !== filter) continue;
           const o = locate(ev.origin);
           const t = locate(ev.target);
           if (!o || !t) continue;
           total++;
+          if (!peak || ev.severity > peak.severity) peak = ev;
           byLayer[ev.layer]++;
           recent.push(now);
           bump(targets, ev.target, ev.targetName);
@@ -242,6 +257,7 @@ export function useAttackStream(): StreamState {
         perSecond: recent.length / 5,
         topTargets: top(targets, 8),
         topOrigins: top(origins, 8),
+        peak,
         replay: g ? g.replay(now) : { pos: 0, v: 0, t: null },
       });
     };
