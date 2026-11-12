@@ -18,7 +18,7 @@
 
 <br />
 
-[About](#about) &nbsp;·&nbsp; [Features](#features) &nbsp;·&nbsp; [How it works](#how-it-works) &nbsp;·&nbsp; [Getting started](#getting-started) &nbsp;·&nbsp; [Deploy](#deploy-to-vercel) &nbsp;·&nbsp; [Configuration](#configuration) &nbsp;·&nbsp; [Project structure](#project-structure)
+[About](#about) &nbsp;·&nbsp; [Features](#features) &nbsp;·&nbsp; [How it works](#how-it-works) &nbsp;·&nbsp; [Getting started](#getting-started) &nbsp;·&nbsp; [Configuration](#configuration) &nbsp;·&nbsp; [Project structure](#project-structure)
 
 </div>
 
